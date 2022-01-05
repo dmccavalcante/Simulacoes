@@ -35,13 +35,13 @@ ajustar.dados <- function(base_estados_com_reforma){
   return(base_estados_com_reforma)
 }
 
-mortes <- function(ativos_ano){
+mortes <- function(ativos_ano, ano = 0){
   #CALCULANDO O N?MERO DE SERVIDORES QUE DEVEM MORRER EM ano
   ativos_ano_agrup <- group_by(ativos_ano, idade, genero)
   ativos_ano_agrup <- summarise(ativos_ano_agrup, qtde = n()) 
   
   ativos_ano_agrup <- left_join(ativos_ano_agrup, tabua, by.x = idade, by.y = genero)
-  ativos_ano_agrup<- ativos_ano_agrup[complete.cases(ativos_ano_agrup), ]
+  ativos_ano_agrup <- ativos_ano_agrup[complete.cases(ativos_ano_agrup), ]
   
   c <- ativos_ano_agrup$qtde
   d <- ativos_ano_agrup$mortal_0
@@ -72,7 +72,11 @@ mortes <- function(ativos_ano){
   
   mortos_ano_agrup <- left_join(mortos_ano_agrup, pens_prob, by.x = "idade", by.y = "genero")
   mortos_ano_agrup$p_pens <- as.numeric(mortos_ano_agrup$p_pens)
-  mortos_ano_agrup<- mortos_ano_agrup[complete.cases(mortos_ano_agrup), ]
+  if(ano == 2020){
+    mortos_ano_agrup <- filter(mortos_ano_agrup, idade >= 18)
+  } else{
+    mortos_ano_agrup <- mortos_ano_agrup[complete.cases(mortos_ano_agrup), ]
+    }
   
   c <- mortos_ano_agrup$qtde
   d <- mortos_ano_agrup$p_pens
@@ -361,86 +365,20 @@ rm(tabua_h,tabua_m)
 names(tabua)[1] <- "idade"
 tabua <- select(tabua, genero, idade, mortal_0)
 
-ativos_2020_agrup <- ativos_2020 %>% 
-  group_by(idade, genero) %>% 
-  dplyr::summarise(qtde = n()) %>% 
-  left_join(., tabua, by.x = idade, by.y = genero)
-
-ativos_2020_agrup <- ativos_2020_agrup[complete.cases(ativos_2020_agrup), ]
-
-c <- ativos_2020_agrup$qtde
-d <- ativos_2020_agrup$mortal_0
-
-ativos_2020_agrup$mortos <- foreach(i = c, j = d) %do% {sintetico(i,j)}
-ativos_2020_agrup$mortos <- as.numeric(ativos_2020_agrup$mortos)
-mortos_est <- sum(ativos_2020_agrup$mortos)
-
-# DEFININDO QUEM, DE FATO, VAI MORRER EM 2020 ENTRE OS ATIVOS
-e <- ativos_2020_agrup$genero
-f <- ativos_2020_agrup$idade
-h <- 1:nrow(ativos_2020_agrup)
-
-df_list <- list()
-filtering <- function(i,j) {filter(ativos_2020, genero==i & idade ==j)}
-df_list <- foreach(i = e, j = f) %do% {filtering(i,j)}
-
-creeping_death <- function(i) {if (ativos_2020_agrup$mortos[i] == 0) {  df_list[[i]]} 
-  else {head(df_list[[i]], -ativos_2020_agrup$mortos[i])}}
-
-df_list <- foreach(i = h) %do% {creeping_death(i)}
-
-ativos_sobrev_2020 <- rbindlist(df_list)
-rm(df_list, ativos_2020_agrup, c, d, e, f, h, i, j, mortos_est)
-
-mortos_2020 <- setdiff(ativos_2020, ativos_sobrev_2020)
-
-# CALCULANDO O N?MERO DE PENS?ES A SEREM INSTITU?DAS EM 2020 
-mortos_2020_agrup <- group_by(mortos_2020, idade, genero)
-mortos_2020_agrup <- summarise(mortos_2020_agrup, qtde = n()) 
-
 pens_prob <- read.csv2("//sbsb2/DIMAC/Novo DIRETORIO NEMAC/Bolsistas/Diogo/Simulações/pensionistas_prob.csv")
 names(pens_prob)[1] <- "idade" 
 pens_prob <- select(pens_prob, idade, idade_conj, p_pens, genero)
 pens_prob$p_pens <- as.numeric(pens_prob$p_pens)
 
-mortos_2020_agrup <- left_join(mortos_2020_agrup, pens_prob, by.x = "idade", by.y = "genero")
-mortos_2020_agrup$p_pens <- as.numeric(mortos_2020_agrup$p_pens)
-mortos_2020_agrup <- filter(mortos_2020_agrup, idade>= 18)
-
-c <- mortos_2020_agrup$qtde
-d <- mortos_2020_agrup$p_pens
-
-mortos_2020_agrup$instituidores <- foreach(i = c, j = d) %do% {sintetico(i,j)}
-mortos_2020_agrup$instituidores <- as.numeric(mortos_2020_agrup$instituidores)
-instituidores_est <- sum(mortos_2020_agrup$instituidores)
-
-# DEFININDO QUEM, DE FATO, VAI INSTITUIR AS PENS?ES
-e <- mortos_2020_agrup$genero
-f <- mortos_2020_agrup$idade
-h <- 1:nrow(mortos_2020_agrup)
-
-df_list <- list()
-filtering <- function(i,j) {filter(mortos_2020, genero==i & idade ==j)}
-df_list <- foreach(i = e, j = f) %do% {filtering(i,j)}
-
-creeping_death <- function(i) {if (mortos_2020_agrup$instituidores[i] == 0) {
-  df_list[[i]]} else {head(df_list[[i]], -mortos_2020_agrup$instituidores[i])}}
-
-df_list <- foreach(i = h) %do% {creeping_death(i)}
-nao_instituidores_2020 <- rbindlist(df_list)
-
-rm(df_list, mortos_2020_agrup, c, d, e, f, h, i, j, instituidores_est)
-
-instituidores_2020 <- setdiff(mortos_2020, nao_instituidores_2020)
+mortes(ativos_2020, 2020)
 
 #CRIANDO OS NOVOS PENSIONISTAS "SINT?TICOS"
-novos_pensionistas_2020 <- criar.pensionistas.sinteticos(instituidores_2020)
+novos_pensionistas_2020 <- criar.pensionistas.sinteticos(instituidores_ano)
 
 # DEFININDO OS SERVIDORES QUE SER?O APOSENTADOS COMPULSORIAMENTE
-compulsorios_2020 <- filter(ativos_sobrev_2020, idade >= 75)
-sobrev_n_compuls_2020 <- filter(ativos_sobrev_2020, idade < 75)
+compulsorios_2020 <- filter(ativos_sobrev_ano, idade >= 75)
+sobrev_n_compuls_2020 <- filter(ativos_sobrev_ano, idade < 75)
 
-rm(ativos_sobrev_2020)
 #DEFININDO OS SERVIDORES ELEG?VEIS EM 2020 QUE N?O SER?O APOSENTADOS COMPULSORIAMENTE
 elegiveis.voluntarios(sobrev_n_compuls_2020, 2020)
 eleg_com_safra1_2020 <- eleg_com_safra1_ano
@@ -455,7 +393,7 @@ novos_aposentados_2020 <- novos_aposentados_ano
 
 #ATUALIZANDO OS DADOS DE QUEM FICOU NA ATIVA
 ativos_2021 <- atualizar.ativos(sobrev_n_compuls_2020, novos_aposentados_2020)
-rm(sobrev_n_compuls_2020, instituidores_2020, nao_instituidores_2020)
+rm(sobrev_n_compuls_2020)
 
 reposicao <- base.reposicao(novos_aposentados_2020, taxa_reposicao, 2020)
 ativos_2021 <- rbindlist(list(ativos_2021, reposicao))
