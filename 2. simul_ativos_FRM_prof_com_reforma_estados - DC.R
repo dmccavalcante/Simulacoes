@@ -12,36 +12,13 @@ taxa_reposicao <- 0.75
 sintetico <- function(n,y) {set.seed(124) 
   rbinom(1, n, y)}
 
-ajustar.dados <- function(base_estados_com_reforma){
-  names(base_estados_com_reforma)[1] <- "id"
-  base_estados_com_reforma$id <- 1:nrow(base_estados_com_reforma)
-  
-  base_estados_com_reforma$idade_adm <- ifelse(base_estados_com_reforma$idade_adm < 18, 18, base_estados_com_reforma$idade_adm)
-  base_estados_com_reforma$idade_adm <- ifelse(base_estados_com_reforma$idade_adm > 74, 74, base_estados_com_reforma$idade_adm)
-  
-  base_estados_com_reforma <- mutate(base_estados_com_reforma, tempo1 = taverb+tempo_empreg, 
-                                     tempo2 = taverb_prof+tempo_empreg,
-                                     pontos1 = idade+tempo1, pontos2 = idade+ tempo2)
-  
-  base_estados_com_reforma_hh <- filter(base_estados_com_reforma, genero == "M") %>% 
-    mutate(pedag1 = 35-tempo1, pedag2 = 30-tempo2,
-           tempo3 = 35+pedag1, tempo4 = 30+pedag2)
-  
-  base_estados_com_reforma_mm <- filter(base_estados_com_reforma, genero == "F") %>% 
-    mutate(pedag1 = 30-tempo1, pedag2 = 25-tempo2,
-           tempo3 = tempo1+pedag1, tempo4 = tempo2+pedag2)
-  
-  base_estados_com_reforma <- full_join(base_estados_com_reforma_mm, base_estados_com_reforma_hh)
-  return(base_estados_com_reforma)
-}
-
-mortes <- function(ativos_ano){
+mortes <- function(ativos_ano, ano = 0){
   #CALCULANDO O N?MERO DE SERVIDORES QUE DEVEM MORRER EM ano
   ativos_ano_agrup <- group_by(ativos_ano, idade, genero)
   ativos_ano_agrup <- summarise(ativos_ano_agrup, qtde = n()) 
   
   ativos_ano_agrup <- left_join(ativos_ano_agrup, tabua, by.x = idade, by.y = genero)
-  ativos_ano_agrup<- ativos_ano_agrup[complete.cases(ativos_ano_agrup), ]
+  ativos_ano_agrup <- ativos_ano_agrup[complete.cases(ativos_ano_agrup), ]
   
   c <- ativos_ano_agrup$qtde
   d <- ativos_ano_agrup$mortal_0
@@ -72,7 +49,11 @@ mortes <- function(ativos_ano){
   
   mortos_ano_agrup <- left_join(mortos_ano_agrup, pens_prob, by.x = "idade", by.y = "genero")
   mortos_ano_agrup$p_pens <- as.numeric(mortos_ano_agrup$p_pens)
-  mortos_ano_agrup<- mortos_ano_agrup[complete.cases(mortos_ano_agrup), ]
+  if(ano == 2020){
+    mortos_ano_agrup <- filter(mortos_ano_agrup, idade >= 18)
+  } else{
+    mortos_ano_agrup <- mortos_ano_agrup[complete.cases(mortos_ano_agrup), ]
+    }
   
   c <- mortos_ano_agrup$qtde
   d <- mortos_ano_agrup$p_pens
@@ -301,43 +282,8 @@ base.reposicao <- function(base_ano, alfa_reposicao, ano_admissao){
 
 # 2019 -------------------------------------------------------------------------
 ## SUBINDO OS DADOS DA TROPA, AJUSTANDO OS DADOS E ETC.
-ativos_2019 <- read.csv2("estados_com_reforma.csv")
-ativos_2019 <- ajustar.dados(ativos_2019)
+ativos_2019 <- readRDS("estados_com_reforma_2019.rds")
 
-# Adicionar tempo expirado
-anos <- 2019:1990
-aux.lista <- vector(mode = "list", length = length(anos))
-aux.elegiveis <- vector(mode = "list", length = length(anos))
-for(i in 1:length(anos)){
-  if(i == 1) aux.lista[[i]] <- ativos_2019
-  elegiveis.voluntarios(aux.lista[[i]], anos[i])
-  aux.elegiveis[[i]] <- rbind(eleg_com_safra1_ano, eleg_com_safra2_ano) %>% 
-    select(id) %>% 
-    mutate(ano = 1)
-  
-  names(aux.elegiveis[[i]])[2] <- str_c("ano_", anos[i])
-  
-  if(i < length(anos)){
-    aux.lista[[i+1]] <- aux.lista[[i]] %>% 
-      mutate(rem_med_nom = taxa_atualizacao_salarial/rem_med_nom,
-             tempo_empreg = tempo_empreg - 1, idade = idade - 1,
-             tempo1 = tempo1 - 1, tempo2 = tempo2 - 1,
-             tempo3 = tempo3 - 1, tempo4 = tempo4 - 1,
-             pontos1 = pontos1 - 2, pontos2 = pontos2 - 2)
-    
-  }
-}
-rm(aux.lista)
-
-elegiveis <- aux.elegiveis %>% 
-  reduce(left_join, by = "id") %>% 
-  mutate(tempo_expirado = rowSums(.[, str_c("ano_", anos)], na.rm = T)) %>% 
-  select(id, tempo_expirado)
-
-ativos_2019 <- left_join(ativos_2019, elegiveis, by = "id") %>% 
-  mutate(tempo_expirado = ifelse(is.na(tempo_expirado), 0, tempo_expirado))
-
-# 2020 -------------------------------------------------------------------------
 # TRANSFORMANDO O ANO BASE DOS DADOS DE 2019 PARA 2020
 ativos_2020 <- ativos_2019 %>% 
   mutate(rem_med_nom = taxa_atualizacao_salarial*rem_med_nom,
@@ -361,122 +307,13 @@ rm(tabua_h,tabua_m)
 names(tabua)[1] <- "idade"
 tabua <- select(tabua, genero, idade, mortal_0)
 
-ativos_2020_agrup <- ativos_2020 %>% 
-  group_by(idade, genero) %>% 
-  dplyr::summarise(qtde = n()) %>% 
-  left_join(., tabua, by.x = idade, by.y = genero)
-
-ativos_2020_agrup <- ativos_2020_agrup[complete.cases(ativos_2020_agrup), ]
-
-c <- ativos_2020_agrup$qtde
-d <- ativos_2020_agrup$mortal_0
-
-ativos_2020_agrup$mortos <- foreach(i = c, j = d) %do% {sintetico(i,j)}
-ativos_2020_agrup$mortos <- as.numeric(ativos_2020_agrup$mortos)
-mortos_est <- sum(ativos_2020_agrup$mortos)
-
-# DEFININDO QUEM, DE FATO, VAI MORRER EM 2020 ENTRE OS ATIVOS
-e <- ativos_2020_agrup$genero
-f <- ativos_2020_agrup$idade
-h <- 1:nrow(ativos_2020_agrup)
-
-df_list <- list()
-filtering <- function(i,j) {filter(ativos_2020, genero==i & idade ==j)}
-df_list <- foreach(i = e, j = f) %do% {filtering(i,j)}
-
-creeping_death <- function(i) {if (ativos_2020_agrup$mortos[i] == 0) {  df_list[[i]]} 
-  else {head(df_list[[i]], -ativos_2020_agrup$mortos[i])}}
-
-df_list <- foreach(i = h) %do% {creeping_death(i)}
-
-ativos_sobrev_2020 <- rbindlist(df_list)
-rm(df_list, ativos_2020_agrup, c, d, e, f, h, i, j, mortos_est)
-
-mortos_2020 <- setdiff(ativos_2020, ativos_sobrev_2020)
-
-# CALCULANDO O N?MERO DE PENS?ES A SEREM INSTITU?DAS EM 2020 
-mortos_2020_agrup <- group_by(mortos_2020, idade, genero)
-mortos_2020_agrup <- summarise(mortos_2020_agrup, qtde = n()) 
-
 pens_prob <- read.csv2("//sbsb2/DIMAC/Novo DIRETORIO NEMAC/Bolsistas/Diogo/Simulações/pensionistas_prob.csv")
 names(pens_prob)[1] <- "idade" 
 pens_prob <- select(pens_prob, idade, idade_conj, p_pens, genero)
 pens_prob$p_pens <- as.numeric(pens_prob$p_pens)
 
-mortos_2020_agrup <- left_join(mortos_2020_agrup, pens_prob, by.x = "idade", by.y = "genero")
-mortos_2020_agrup$p_pens <- as.numeric(mortos_2020_agrup$p_pens)
-mortos_2020_agrup <- filter(mortos_2020_agrup, idade>= 18)
-
-c <- mortos_2020_agrup$qtde
-d <- mortos_2020_agrup$p_pens
-
-mortos_2020_agrup$instituidores <- foreach(i = c, j = d) %do% {sintetico(i,j)}
-mortos_2020_agrup$instituidores <- as.numeric(mortos_2020_agrup$instituidores)
-instituidores_est <- sum(mortos_2020_agrup$instituidores)
-
-# DEFININDO QUEM, DE FATO, VAI INSTITUIR AS PENS?ES
-e <- mortos_2020_agrup$genero
-f <- mortos_2020_agrup$idade
-h <- 1:nrow(mortos_2020_agrup)
-
-df_list <- list()
-filtering <- function(i,j) {filter(mortos_2020, genero==i & idade ==j)}
-df_list <- foreach(i = e, j = f) %do% {filtering(i,j)}
-
-creeping_death <- function(i) {if (mortos_2020_agrup$instituidores[i] == 0) {
-  df_list[[i]]} else {head(df_list[[i]], -mortos_2020_agrup$instituidores[i])}}
-
-df_list <- foreach(i = h) %do% {creeping_death(i)}
-nao_instituidores_2020 <- rbindlist(df_list)
-
-rm(df_list, mortos_2020_agrup, c, d, e, f, h, i, j, instituidores_est)
-
-instituidores_2020 <- setdiff(mortos_2020, nao_instituidores_2020)
-
-#CRIANDO OS NOVOS PENSIONISTAS "SINT?TICOS"
-novos_pensionistas_2020 <- criar.pensionistas.sinteticos(instituidores_2020)
-
-# DEFININDO OS SERVIDORES QUE SER?O APOSENTADOS COMPULSORIAMENTE
-compulsorios_2020 <- filter(ativos_sobrev_2020, idade >= 75)
-sobrev_n_compuls_2020 <- filter(ativos_sobrev_2020, idade < 75)
-
-rm(ativos_sobrev_2020)
-#DEFININDO OS SERVIDORES ELEG?VEIS EM 2020 QUE N?O SER?O APOSENTADOS COMPULSORIAMENTE
-elegiveis.voluntarios(sobrev_n_compuls_2020, 2020)
-eleg_com_safra1_2020 <- eleg_com_safra1_ano
-eleg_com_safra2_2020 <- eleg_com_safra2_ano
-
-## CALCULANDO O N?MERO DE NOVAS APOSENTADORIAS VOLUNT?RIAS EM 2020 DAS SAFRAS 1 E 2
-probit_19_safra_1 <- glm(inativo ~ idade + genero + rem_med_nom + tempo_expirado, family = binomial(link = "logit"), data = eleg_com_safra1_2020)
-probit_19_safra_2 <- glm(inativo ~ idade + genero + rem_med_nom + tempo_expirado, family = binomial(link = "logit"), data = eleg_com_safra2_2020)
-
-eleg_com_safra1_2020$probabilidade_estimada <- predict(probit_19_safra_1, eleg_com_safra1_2020, type = "response", se.fit = F)
-set.seed(42)
-eleg_com_safra1_2020$uniforme <- runif(nrow(eleg_com_safra1_2020))
-eleg_com_safra1_2020 <- eleg_com_safra1_2020 %>% mutate(inativo_estimado = ifelse(uniforme <= probabilidade_estimada, 1, 0))
-
-eleg_com_safra2_2020$probabilidade_estimada <- predict(probit_19_safra_2, eleg_com_safra2_2020, type = "response", se.fit = F)
-set.seed(42)
-eleg_com_safra2_2020$uniforme <- runif(nrow(eleg_com_safra2_2020))
-eleg_com_safra2_2020 <- eleg_com_safra2_2020 %>% mutate(inativo_estimado = ifelse(uniforme <= probabilidade_estimada, 1, 0))
-
-apos_vol_safra1_2020 <- filter(eleg_com_safra1_2020, inativo_estimado %in% 1) %>% select(-c(probabilidade_estimada, uniforme, inativo_estimado))
-apos_vol_safra2_2020 <- filter(eleg_com_safra2_2020, inativo_estimado %in% 1) %>% select(-c(probabilidade_estimada, uniforme, inativo_estimado))
-
-apos_vol_2020 <- rbind(apos_vol_safra1_2020, apos_vol_safra2_2020)
-
-novos_aposentados_2020 <- rbind(apos_vol_2020, compulsorios_2020)
-rm(apos_vol_2020, compulsorios_2020, apos_vol_safra2_2020, apos_vol_safra1_2020)
-
-#ATUALIZANDO OS DADOS DE QUEM FICOU NA ATIVA
-ativos_2021 <- atualizar.ativos(sobrev_n_compuls_2020, novos_aposentados_2020)
-rm(sobrev_n_compuls_2020, instituidores_2020, nao_instituidores_2020)
-
-reposicao <- base.reposicao(novos_aposentados_2020, taxa_reposicao, 2020)
-ativos_2021 <- rbindlist(list(ativos_2021, reposicao))
-
 # 2021 em diante ---------------------------------------------------------------
-anos <- 2021:2055
+anos <- 2020:2055
 lista.ativos <- vector(mode = "list", length = length(anos))
 lista.mortos <- vector(mode = "list", length = length(anos))
 lista.novos_pensionistas <- vector(mode = "list", length = length(anos))
@@ -485,8 +322,8 @@ lista.compulsorios <- vector(mode = "list", length = length(anos))
 lista.eleg_com_safra1 <- vector(mode = "list", length = length(anos))
 lista.eleg_com_safra2 <- vector(mode = "list", length = length(anos))
 for(i in 1:length(anos)){
-  if(i == 1){lista.ativos[[1]] <- ativos_2021}
-  mortes(lista.ativos[[i]])
+  if(i == 1){lista.ativos[[1]] <- ativos_2020}
+  mortes(lista.ativos[[i]], anos[i])
   lista.mortos[[i]] <- mortos_ano
   
   # CRIANDO OS NOVOS PENSIONISTAS "SINT?TICOS"
@@ -500,6 +337,12 @@ for(i in 1:length(anos)){
   elegiveis.voluntarios(sobrev_n_compuls, anos[i])
   lista.eleg_com_safra1[[i]] <- eleg_com_safra1_ano
   lista.eleg_com_safra2[[i]] <- eleg_com_safra2_ano
+  
+  # modelo
+  if(i == 1){
+    probit_19_safra_1 <- glm(inativo ~ idade + genero + rem_med_nom + tempo_expirado, family = binomial(link = "logit"), data = lista.eleg_com_safra1[[i]])
+    probit_19_safra_2 <- glm(inativo ~ idade + genero + rem_med_nom + tempo_expirado, family = binomial(link = "logit"), data = lista.eleg_com_safra2[[i]])
+  }
   
   # DEFININDO QUEM, DE FATO, VAI SE APOSENTAR VOLUNTARIAMENTE EM 2021
   aposentadoria.voluntaria(lista.eleg_com_safra1[[i]], lista.eleg_com_safra2[[i]], lista.compulsorios[[i]])
@@ -521,17 +364,6 @@ names(lista.eleg_com_safra1) <- anos
 names(lista.eleg_com_safra2) <- anos
 
 # salvar dados -----------------------------------------------------------------
-# for(i in 1:length(anos)){
-#   write.csv2(lista.novos_aposentados[[i]], paste0("novos_aposentados/novos_aposentados_estados_com_", anos[i],".csv"))
-#   write.csv2(lista.novos_pensionistas[[i]], paste0("novos_pensionistas/novos_pensionistas_estados_com_", anos[i],".csv"))
-#   write.csv2(lista.ativos[[i]], paste0("ativos/ativos_estados_com_", anos[i],".csv"))
-# }
-# write.csv2(novos_aposentados_2020, "novos_aposentados/novos_aposentados_estados_com_2020.csv")
-# write.csv2(novos_pensionistas_2020, "novos_pensionistas/novos_pensionistas_estados_com_2020.csv")
-# write.csv2(ativos_2019, "ativos/ativos_estados_com_2019.csv")
-# write.csv2(ativos_2020, "ativos/ativos_estados_com_2020.csv")
-
 saveRDS(lista.ativos, paste0("comparativo/ativos_reposicao_", taxa_reposicao, ".rds"))
 saveRDS(lista.novos_aposentados, paste0("comparativo/novos_aposentados_reposicao_", taxa_reposicao, ".rds"))
 saveRDS(lista.novos_pensionistas, paste0("comparativo/novos_pensionistas_reposicao_", taxa_reposicao, ".rds"))
-
