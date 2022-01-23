@@ -4,7 +4,7 @@ library(dplyr)
 library(foreach)
 library(tidyverse)
 library(data.table)
-setwd("//sbsb2/DIMAC/Novo DIRETORIO NEMAC/Bolsistas/Diogo/Simulações/microdados_finais")
+setwd("C:/Users/Diogo/Desktop/Ipea/Simulações/microdados_finais")
 taxa_atualizacao_salarial <- 1.015
 taxa_reposicao <- 0.75
 
@@ -12,7 +12,7 @@ taxa_reposicao <- 0.75
 sintetico <- function(n,y) {set.seed(124) 
   rbinom(1, n, y)}
 
-mortes <- function(ativos_ano, ano = 0){
+mortes <- function(ativos_ano){
   #CALCULANDO O N?MERO DE SERVIDORES QUE DEVEM MORRER EM ano
   ativos_ano_agrup <- group_by(ativos_ano, idade, genero)
   ativos_ano_agrup <- summarise(ativos_ano_agrup, qtde = n()) 
@@ -42,8 +42,11 @@ mortes <- function(ativos_ano, ano = 0){
   
   ativos_sobrev_ano <<- rbindlist(df_list)
   mortos_ano <<- setdiff(ativos_ano, ativos_sobrev_ano)
-  
-  # CALCULANDO O N?MERO DE PENS?ES A SEREM INSTITU?DAS EM ano 
+  }
+
+criar.pensionistas.sinteticos <- function(instituidores, ano = 0){
+  if(nrow(mortos_ano)>0) {
+    # CALCULANDO O N?MERO DE PENS?ES A SEREM INSTITU?DAS EM ano 
   mortos_ano_agrup <- group_by(mortos_ano, idade, genero)
   mortos_ano_agrup <- summarise(mortos_ano_agrup, qtde = n()) 
   
@@ -53,7 +56,7 @@ mortes <- function(ativos_ano, ano = 0){
     mortos_ano_agrup <- filter(mortos_ano_agrup, idade >= 18)
   } else{
     mortos_ano_agrup <- mortos_ano_agrup[complete.cases(mortos_ano_agrup), ]
-    }
+  }
   
   c <- mortos_ano_agrup$qtde
   d <- mortos_ano_agrup$p_pens
@@ -78,9 +81,7 @@ mortes <- function(ativos_ano, ano = 0){
   nao_instituidores_ano <- rbindlist(df_list)
   
   instituidores_ano <<- setdiff(mortos_ano, nao_instituidores_ano)
-}
-
-criar.pensionistas.sinteticos <- function(instituidores){
+  
   novos_pensionistas_M <- filter(instituidores, genero == "M")
   novos_pensionistas_M$genero <- "F"
   novos_pensionistas_M20 <- filter(novos_pensionistas_M, idade<30)
@@ -123,6 +124,10 @@ criar.pensionistas.sinteticos <- function(instituidores){
   novos_pensionistas_ano$rem_med_nom <- ifelse(novos_pensionistas_ano$tempo_empreg_ad <= 0, 0.6*novos_pensionistas_ano$rem_med_nom, 
                                                (0.6+0.02*novos_pensionistas_ano$tempo_empreg_ad)*novos_pensionistas_ano$rem_med_nom)
   novos_pensionistas_ano$tempo_empreg_ad <- NULL
+  } else {
+    novos_pensionistas_ano <- mortos_ano
+    instituidores_ano <<- mortos_ano
+    }
   return(novos_pensionistas_ano)
 }
 
@@ -298,8 +303,8 @@ ativos_2020 <- ativos_2020[rows, ]
 rm(rows)
 
 # CALCULANDO O N?MERO DE SERVIDORES QUE DEVEM MORRER EM 2020
-tabua_m <- read.csv2("//sbsb2/DIMAC/Novo DIRETORIO NEMAC/Bolsistas/Diogo/Simulações/tabua_nm_mul.csv")
-tabua_h <- read.csv2("//sbsb2/DIMAC/Novo DIRETORIO NEMAC/Bolsistas/Diogo/Simulações/tabua_nm_hom.csv")
+tabua_m <- read.csv2("C:/Users/Diogo/Desktop/Ipea/Simulações/tabua_nm_mul.csv")
+tabua_h <- read.csv2("C:/Users/Diogo/Desktop/Ipea/Simulações/tabua_nm_hom.csv")
 tabua_h$genero <- "M"
 tabua_m$genero <- "F"
 tabua <- rbind(tabua_h,tabua_m)
@@ -307,12 +312,12 @@ rm(tabua_h,tabua_m)
 names(tabua)[1] <- "idade"
 tabua <- select(tabua, genero, idade, mortal_0)
 
-pens_prob <- read.csv2("//sbsb2/DIMAC/Novo DIRETORIO NEMAC/Bolsistas/Diogo/Simulações/pensionistas_prob.csv")
+pens_prob <- read.csv2("C:/Users/Diogo/Desktop/Ipea/Simulações/pensionistas_prob.csv")
 names(pens_prob)[1] <- "idade" 
 pens_prob <- select(pens_prob, idade, idade_conj, p_pens, genero)
 pens_prob$p_pens <- as.numeric(pens_prob$p_pens)
 
-# 2021 em diante ---------------------------------------------------------------
+# 2020 em diante ---------------------------------------------------------------
 anos <- 2020:2055
 lista.ativos <- vector(mode = "list", length = length(anos))
 lista.mortos <- vector(mode = "list", length = length(anos))
@@ -323,11 +328,11 @@ lista.eleg_com_safra1 <- vector(mode = "list", length = length(anos))
 lista.eleg_com_safra2 <- vector(mode = "list", length = length(anos))
 for(i in 1:length(anos)){
   if(i == 1){lista.ativos[[1]] <- ativos_2020}
-  mortes(lista.ativos[[i]], anos[i])
+  mortes(lista.ativos[[i]])
   lista.mortos[[i]] <- mortos_ano
   
   # CRIANDO OS NOVOS PENSIONISTAS "SINT?TICOS"
-  lista.novos_pensionistas[[i]] <- criar.pensionistas.sinteticos(instituidores_ano)
+  lista.novos_pensionistas[[i]] <- criar.pensionistas.sinteticos(instituidores_ano, anos[i])
   
   # DEFININDO OS SERVIDORES QUE SER?O APOSENTADOS COMPULSORIAMENTE
   lista.compulsorios[[i]] <- filter(ativos_sobrev_ano, idade >= 75)
@@ -351,7 +356,7 @@ for(i in 1:length(anos)){
   # ATUALIZANDO OS DADOS DE QUEM FICOU NA ATIVA
   if(i < length(anos)){
     lista.ativos[[i+1]] <- atualizar.ativos(sobrev_n_compuls, lista.novos_aposentados[[i]])
-    reposicao <- base.reposicao(lista.novos_aposentados[[i]], taxa_reposicao, anos[i])
+    reposicao <- base.reposicao(rbind(lista.novos_aposentados[[i]], lista.mortos[[i]]), taxa_reposicao, anos[i])
     lista.ativos[[i+1]] <- rbindlist(list(lista.ativos[[i+1]], reposicao))
   }
 }
@@ -367,3 +372,4 @@ names(lista.eleg_com_safra2) <- anos
 saveRDS(lista.ativos, paste0("comparativo/ativos_reposicao_", taxa_reposicao, ".rds"))
 saveRDS(lista.novos_aposentados, paste0("comparativo/novos_aposentados_reposicao_", taxa_reposicao, ".rds"))
 saveRDS(lista.novos_pensionistas, paste0("comparativo/novos_pensionistas_reposicao_", taxa_reposicao, ".rds"))
+saveRDS(lista.novos_aposentados, paste0("comparativo/novos_aposentados_reposicao_", taxa_reposicao, ".rds"))
